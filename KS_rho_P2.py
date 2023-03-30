@@ -89,14 +89,27 @@ def Tgas(x, gamma, c, Mvir):
     return (ygasx**(gamma - 1.))
 
 
-# Eq. 15 (coeff here is free and setting it to 1.)
-def rhogas(x, gamma, c, coeff=1.):
+def rhogas_r(r, gamma, c, Mvir=1e15, fb_cosmo=0.048 / 0.3):
+    rvir = mass_so.M_to_R(Mvir, 0.0, mdef) / 1000.
+    rs = rvir / c
+    x = r / rs
     ygasx = ygas(x, gamma, c)
-    return coeff * ygasx
+    return  ygasx
+# Eq. 15 (coeff here is free and setting it to 1.)
+def rhogas(rp_array, gamma, c, Mvir,Rvir, coeff=1.):
+    Px_2D = np.zeros_like(rp_array)
+    for jr in range(len(rp_array)):
+        r = np.linspace(1.03 * rp_array[jr], 5.0, 500)
+        rs = Rvir / c
+        x = r / rs
+        ygasx = ygas(x, gamma, c)
+        Px_2D[jr] = 2 * sp.integrate.simps(r * ygasx / (np.sqrt(r**2 - (rp_array[jr])**2)), r)
+    return coeff * Px_2D
 
 
-def coeffgas_full(gamma, c, Mvir, rvir, fb_cosmo=0.048 / 0.3):
+def coeffgas_full(gamma, c, Mvir=1e15, fb_cosmo=0.048 / 0.3):
     r = np.linspace(0.01, 5, 2000)
+    rvir = mass_so.M_to_R(Mvir, 0.0, mdef) / 1000.
     rs = rvir / c
     x = r / rs
     ygasx = ygas(x, gamma, c)
@@ -104,33 +117,6 @@ def coeffgas_full(gamma, c, Mvir, rvir, fb_cosmo=0.048 / 0.3):
     ygasx_int = sp.integrate.simps((ygasx * 4 * np.pi * r**2)[indsel], r[indsel])
     coeff = (Mvir / ygasx_int) * fb_cosmo
     return coeff
-
-
-def rhogas_r(r, gamma, c, Mvir, rvir, fb_cosmo=0.048 / 0.3):
-    rs = rvir / c
-    x = r / rs
-    ygasx = ygas(x, gamma, c)
-    coeff = coeffgas_full(gamma, c, Mvir, rvir, fb_cosmo=fb_cosmo)
-    return coeff * ygasx
-
-def rhogas_2Dr(rp_array, gamma, c, Mvir, rvir, rmax_rvir=5.0, fb=1, h=1):
-    Px_2D = np.zeros_like(rp_array)
-    for jr in range(len(rp_array)):
-        r = np.linspace(1.03 * rp_array[jr], 5.0, 500)
-        rs = rvir / c
-        x = r / rs
-        rho_gas = rhogas_r(r, gamma, c, Mvir, rvir, fb_cosmo=fb)
-        indsel = np.where(r > rmax_rvir * rvir)[0]
-        rho_gas[indsel] = 0.0
-        Px_2D[jr] = 2 * sp.integrate.simps(r * rho_gas / (np.sqrt(r**2 - (rp_array[jr])**2)), r)
-    return Px_2D
-
-
-def P0gas(x, gamma, c, Mvir, coeff_rho=1., coeff_T=1.):
-    kB_Tgas = Tgas(x, gamma, c, Mvir)
-    rho_gas = rhogas(x, gamma, c, coeff=coeff_rho)
-    P_gas = rho_gas * (kB_Tgas)
-    return P_gas
 
 
 def P0gas_r(r, gamma, c, Mvir, rmax_rvir=5.0):
@@ -148,18 +134,47 @@ def P0gas_r(r, gamma, c, Mvir, rmax_rvir=5.0):
     return P_gas
 
 
-def P0gas_2Dr(rp_array, gamma, c, Mvir, rvir, rmax_rvir=5.0, fb=1, h=1):
+def P0gas(rp_array, gamma, c, Mvir,Rvir, coeff_rho=1., coeff_T=1.):
     Px_2D = np.zeros_like(rp_array)
     for jr in range(len(rp_array)):
         r = np.linspace(1.03 * rp_array[jr], 5.0, 500)
+        rs = Rvir / c
+        x = r / rs
+        kB_Tgas = Tgas(x, gamma, c, Mvir)
+        rho_gas = rhogas_r(x, gamma, c, Mvir)
+        P_gas = rho_gas * (kB_Tgas)
+        Px_2D[jr] = 2 * sp.integrate.simps(r * P_gas / (np.sqrt(r**2 - (rp_array[jr])**2)), r)
+    return Px_2D
+
+
+def P0gas_r(r, gamma, c, Mvir, rmax_rvir=5.0):
+    rvir = mass_so.M_to_R(Mvir, 0.0, mdef) / 1000.
+    rs = rvir / c
+    x = r / rs
+    mu = 0.59
+    eta0 = eta0_func(c, c, gamma)
+    kB_T0 = (1. / 3.) * eta0 * ((Mvir * units.Msun / (rvir * units.Mpc)) * mu * (const.G * const.m_p)).to(units.keV)
+    kB_Tgas = kB_T0 * Tgas(x, gamma, c, Mvir)
+    rho_gas = rhogas_r(r, gamma, c, Mvir=Mvir)
+    P_gas = 55 * rho_gas * ((cosmo.h**2) / (1e14)) * (kB_Tgas / 8.)
+    indsel = np.where(r > rmax_rvir * rvir)[0]
+    P_gas[indsel] = 0.0
+    return P_gas
+
+
+def P0gas_2Dr(rp_array, gamma, c, Mvir, rmax_rvir=5.0):
+    Px_2D = np.zeros_like(rp_array)
+    for jr in range(len(rp_array)):
+        r = np.linspace(1.03 * rp_array[jr], 5.0, 500)
+        rvir = mass_so.M_to_R(Mvir, 0.0, mdef) / 1000.
         rs = rvir / c
         x = r / rs
         mu = 0.59
         eta0 = eta0_func(c, c, gamma)
         kB_T0 = (1. / 3.) * eta0 * ((Mvir * units.Msun / (rvir * units.Mpc)) * mu * (const.G * const.m_p)).to(units.keV)
         kB_Tgas = kB_T0 * Tgas(x, gamma, c, Mvir)
-        rho_gas = rhogas_r(r, gamma, c, Mvir, rvir, fb_cosmo=fb)
-        Px_3D = 55 * rho_gas * ((h**2) / (1e14)) * (kB_Tgas / 8.)
+        rho_gas = rhogas_r(r, gamma, c, Mvir=Mvir, fb_cosmo=cosmo.Ob0 / cosmo.Om0)
+        Px_3D = 55 * rho_gas * ((cosmo.h**2) / (1e14)) * (kB_Tgas / 8.)
         indsel = np.where(r > rmax_rvir * rvir)[0]
         Px_3D[indsel] = 0.0
         Px_2D[jr] = 2 * sp.integrate.simps(r * Px_3D / (np.sqrt(r**2 - (rp_array[jr])**2)), r)
